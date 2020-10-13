@@ -1,0 +1,119 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: registry
+  annotations:
+    openshift.io/display-name: "Docker registry"
+    description: |-
+      Custom docker registry
+parameters:
+- name: APP_NAME
+  description: Application name
+  value: registry
+  required: true
+- name: DOCKER_IMAGE
+  description: Docker image of the registry
+  value: registry:2
+  required: true
+- name: PVC_CAPACITY
+  description: Size of the Persistent Volume
+  value: 20Gi
+  required: true
+objects:
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    name: ${APP_NAME}
+    labels:
+      app: ${APP_NAME}
+  spec:
+    tags:
+    - from:
+        kind: DockerImage
+        name: ${DOCKER_IMAGE}
+      importPolicy:
+        scheduled: true
+      name: latest
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: ${APP_NAME}
+    labels:
+      app: ${APP_NAME}
+  spec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${PVC_CAPACITY}
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: ${APP_NAME}
+    labels:
+      app: ${APP_NAME}
+    annotations:
+      service.beta.openshift.io/serving-cert-secret-name: ${APP_NAME}
+  spec:
+    type: ClusterIP
+    ports:
+    - name: 443-port
+      port: 443
+      targetPort: 8443
+      protocol: TCP
+    selector:
+      app: ${APP_NAME}
+      deploymentconfig: ${APP_NAME}
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    name: ${APP_NAME}
+    labels:
+      app: ${APP_NAME}
+  spec:
+    replicas: 1
+    selector:
+      app: ${APP_NAME}
+      deploymentconfig: ${APP_NAME}
+    template:
+      metadata:
+        labels:
+          app: ${APP_NAME}
+          deploymentconfig: ${APP_NAME}
+      spec:
+        containers:
+        - env:
+          - name: REGISTRY_HTTP_ADDR
+            value: 0.0.0.0:8443
+          - name: REGISTRY_HTTP_TLS_CERTIFICATE
+            value: /certs/tls.crt
+          - name: REGISTRY_HTTP_TLS_KEY
+            value: /certs/tls.key
+          image: ' '
+          name: ${APP_NAME}
+          ports:
+          - containerPort: 8443
+            protocol: TCP
+          volumeMounts:
+          - mountPath: /var/lib/registry
+            name: registry
+          - mountPath: /certs
+            name: certs
+        volumes:
+        - name: registry
+          persistentVolumeClaim:
+            claimName: ${APP_NAME}
+        - name: certs
+          secret:
+            secretName: ${APP_NAME}
+    triggers:
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - ${APP_NAME}
+        from:
+          kind: ImageStreamTag
+          name: ${APP_NAME}:latest
+      type: ImageChange
+    - type: ConfigChange
+
